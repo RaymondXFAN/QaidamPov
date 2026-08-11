@@ -1,0 +1,221 @@
+nohup: ignoring input
+🖥️ Device: cuda
+   LoRA: r=8, alpha=16
+   Seeds: [42, 123, 2024]
+   Pretrained: True
+
+============================================================
+🌍 Prithvi+LoRA | Seed=42 | epochs=50 | lr=0.0005
+============================================================
+  LoRA 应用: 24 个层
+    - blocks.0.attn.qkv
+    - blocks.0.attn.proj
+    - blocks.1.attn.qkv
+    - blocks.1.attn.proj
+    - blocks.2.attn.qkv
+    - blocks.2.attn.proj
+    - blocks.3.attn.qkv
+    - blocks.3.attn.proj
+    - blocks.4.attn.qkv
+    - blocks.4.attn.proj
+    - blocks.5.attn.qkv
+    - blocks.5.attn.proj
+    - blocks.6.attn.qkv
+    - blocks.6.attn.proj
+    - blocks.7.attn.qkv
+    - blocks.7.attn.proj
+    - blocks.8.attn.qkv
+    - blocks.8.attn.proj
+    - blocks.9.attn.qkv
+    - blocks.9.attn.proj
+    - blocks.10.attn.qkv
+    - blocks.10.attn.proj
+    - blocks.11.attn.qkv
+    - blocks.11.attn.proj
+  可训练参数: 58,381,056 / 86,729,472 (67.31%)
+  📦 找到 Prithvi checkpoint: /root/autodl-tmp/qaidam-salinization-project/models/prithvi-100M/Prithvi_100M.pt
+  📂 加载 Prithvi checkpoint: /root/autodl-tmp/qaidam-salinization-project/models/prithvi-100M/Prithvi_100M.pt
+  📋 Checkpoint 共 254 个 key，前 10 个:
+     encoder.cls_token: torch.Size([1, 1, 768])
+     encoder.pos_embed: torch.Size([1, 589, 768])
+     decoder.mask_token: torch.Size([1, 1, 512])
+     decoder.decoder_pos_embed: torch.Size([1, 589, 512])
+     encoder.patch_embed.proj.weight: torch.Size([768, 6, 1, 16, 16])
+     encoder.patch_embed.proj.bias: torch.Size([768])
+     encoder.blocks.0.norm1.weight: torch.Size([768])
+     encoder.blocks.0.norm1.bias: torch.Size([768])
+     encoder.blocks.0.attn.qkv.weight: torch.Size([2304, 768])
+     encoder.blocks.0.attn.qkv.bias: torch.Size([2304])
+  ⚠️ pos_embed 形状不匹配: torch.Size([1, 589, 768]) vs 期望 (1, 65, 768)
+  📐 检测到 temporal pos_embed: T=3, spatial=14×14
+  📐 提取中间帧 → 插值: 14×14 → 8×8
+  ✅ pos_embed 处理完成: torch.Size([1, 589, 768]) → torch.Size([1, 65, 768])
+  ✅ Prithvi 权重加载: 101 个 key 匹配
+     Missing: 0, Unexpected: 0
+  ⚠️ 形状不匹配跳过的 key (1 个):
+     - patch_embed.proj.weight: ckpttorch.Size([768, 6, 1, 16, 16]) vs modeltorch.Size([768, 6, 16, 16])
+  🎉 成功加载 101 个预训练权重！
+  Ep  1/50 | Loss 1.928 | ValS 0.521 | ValC 0.531
+  Ep  5/50 | Loss 1.710 | ValS 0.674 | ValC 0.607
+  Ep 10/50 | Loss 1.742 | ValS 0.613 | ValC 0.524
+  Ep 15/50 | Loss 1.658 | ValS 0.610 | ValC 0.594
+  Ep 20/50 | Loss 1.611 | ValS 0.626 | ValC 0.501
+  Ep 25/50 | Loss 1.657 | ValS 0.613 | ValC 0.527
+  Ep 30/50 | Loss 1.566 | ValS 0.696 | ValC 0.591
+  Ep 35/50 | Loss 1.522 | ValS 0.707 | ValC 0.646
+  Ep 40/50 | Loss 1.521 | ValS 0.708 | ValC 0.669
+  Ep 45/50 | Loss 1.462 | ValS 0.708 | ValC 0.648
+  Ep 50/50 | Loss 1.482 | ValS 0.731 | ValC 0.658
+  ✅ Test | IoU=0.7477 | AccC=0.6887 | F1mC=0.3034
+     Change F1 per class: [0.22598704 0.86151505 0.         0.12608743]
+     Checkpoint: /root/autodl-tmp/QaidamPov/checkpoints/prithvi_lora_seed42.pth
+
+============================================================
+🌍 Prithvi+LoRA | Seed=123 | epochs=50 | lr=0.0005
+============================================================
+  LoRA 应用: 24 个层
+    - blocks.0.attn.qkv
+    - blocks.0.attn.proj
+    - blocks.1.attn.qkv
+    - blocks.1.attn.proj
+    - blocks.2.attn.qkv
+    - blocks.2.attn.proj
+    - blocks.3.attn.qkv
+    - blocks.3.attn.proj
+    - blocks.4.attn.qkv
+    - blocks.4.attn.proj
+    - blocks.5.attn.qkv
+    - blocks.5.attn.proj
+    - blocks.6.attn.qkv
+    - blocks.6.attn.proj
+    - blocks.7.attn.qkv
+    - blocks.7.attn.proj
+    - blocks.8.attn.qkv
+    - blocks.8.attn.proj
+    - blocks.9.attn.qkv
+    - blocks.9.attn.proj
+    - blocks.10.attn.qkv
+    - blocks.10.attn.proj
+    - blocks.11.attn.qkv
+    - blocks.11.attn.proj
+  可训练参数: 58,381,056 / 86,729,472 (67.31%)
+  📦 找到 Prithvi checkpoint: /root/autodl-tmp/qaidam-salinization-project/models/prithvi-100M/Prithvi_100M.pt
+  📂 加载 Prithvi checkpoint: /root/autodl-tmp/qaidam-salinization-project/models/prithvi-100M/Prithvi_100M.pt
+  📋 Checkpoint 共 254 个 key，前 10 个:
+     encoder.cls_token: torch.Size([1, 1, 768])
+     encoder.pos_embed: torch.Size([1, 589, 768])
+     decoder.mask_token: torch.Size([1, 1, 512])
+     decoder.decoder_pos_embed: torch.Size([1, 589, 512])
+     encoder.patch_embed.proj.weight: torch.Size([768, 6, 1, 16, 16])
+     encoder.patch_embed.proj.bias: torch.Size([768])
+     encoder.blocks.0.norm1.weight: torch.Size([768])
+     encoder.blocks.0.norm1.bias: torch.Size([768])
+     encoder.blocks.0.attn.qkv.weight: torch.Size([2304, 768])
+     encoder.blocks.0.attn.qkv.bias: torch.Size([2304])
+  ⚠️ pos_embed 形状不匹配: torch.Size([1, 589, 768]) vs 期望 (1, 65, 768)
+  📐 检测到 temporal pos_embed: T=3, spatial=14×14
+  📐 提取中间帧 → 插值: 14×14 → 8×8
+  ✅ pos_embed 处理完成: torch.Size([1, 589, 768]) → torch.Size([1, 65, 768])
+  ✅ Prithvi 权重加载: 101 个 key 匹配
+     Missing: 0, Unexpected: 0
+  ⚠️ 形状不匹配跳过的 key (1 个):
+     - patch_embed.proj.weight: ckpttorch.Size([768, 6, 1, 16, 16]) vs modeltorch.Size([768, 6, 16, 16])
+  🎉 成功加载 101 个预训练权重！
+  Ep  1/50 | Loss 1.952 | ValS 0.571 | ValC 0.576
+  Ep  5/50 | Loss 1.656 | ValS 0.696 | ValC 0.586
+  Ep 10/50 | Loss 1.668 | ValS 0.730 | ValC 0.572
+  Ep 15/50 | Loss 1.596 | ValS 0.733 | ValC 0.661
+  Ep 20/50 | Loss 1.654 | ValS 0.759 | ValC 0.667
+  Ep 25/50 | Loss 1.648 | ValS 0.839 | ValC 0.789
+  Ep 30/50 | Loss 1.535 | ValS 0.740 | ValC 0.655
+  Ep 35/50 | Loss 1.427 | ValS 0.748 | ValC 0.680
+  Ep 40/50 | Loss 1.384 | ValS 0.735 | ValC 0.652
+  Ep 45/50 | Loss 1.363 | ValS 0.734 | ValC 0.670
+  Ep 50/50 | Loss 1.423 | ValS 0.730 | ValC 0.658
+  ✅ Test | IoU=0.8018 | AccC=0.7317 | F1mC=0.2500
+     Change F1 per class: [0.         0.88443769 0.         0.11551238]
+     Checkpoint: /root/autodl-tmp/QaidamPov/checkpoints/prithvi_lora_seed123.pth
+
+============================================================
+🌍 Prithvi+LoRA | Seed=2024 | epochs=50 | lr=0.0005
+============================================================
+  LoRA 应用: 24 个层
+    - blocks.0.attn.qkv
+    - blocks.0.attn.proj
+    - blocks.1.attn.qkv
+    - blocks.1.attn.proj
+    - blocks.2.attn.qkv
+    - blocks.2.attn.proj
+    - blocks.3.attn.qkv
+    - blocks.3.attn.proj
+    - blocks.4.attn.qkv
+    - blocks.4.attn.proj
+    - blocks.5.attn.qkv
+    - blocks.5.attn.proj
+    - blocks.6.attn.qkv
+    - blocks.6.attn.proj
+    - blocks.7.attn.qkv
+    - blocks.7.attn.proj
+    - blocks.8.attn.qkv
+    - blocks.8.attn.proj
+    - blocks.9.attn.qkv
+    - blocks.9.attn.proj
+    - blocks.10.attn.qkv
+    - blocks.10.attn.proj
+    - blocks.11.attn.qkv
+    - blocks.11.attn.proj
+  可训练参数: 58,381,056 / 86,729,472 (67.31%)
+  📦 找到 Prithvi checkpoint: /root/autodl-tmp/qaidam-salinization-project/models/prithvi-100M/Prithvi_100M.pt
+  📂 加载 Prithvi checkpoint: /root/autodl-tmp/qaidam-salinization-project/models/prithvi-100M/Prithvi_100M.pt
+  📋 Checkpoint 共 254 个 key，前 10 个:
+     encoder.cls_token: torch.Size([1, 1, 768])
+     encoder.pos_embed: torch.Size([1, 589, 768])
+     decoder.mask_token: torch.Size([1, 1, 512])
+     decoder.decoder_pos_embed: torch.Size([1, 589, 512])
+     encoder.patch_embed.proj.weight: torch.Size([768, 6, 1, 16, 16])
+     encoder.patch_embed.proj.bias: torch.Size([768])
+     encoder.blocks.0.norm1.weight: torch.Size([768])
+     encoder.blocks.0.norm1.bias: torch.Size([768])
+     encoder.blocks.0.attn.qkv.weight: torch.Size([2304, 768])
+     encoder.blocks.0.attn.qkv.bias: torch.Size([2304])
+  ⚠️ pos_embed 形状不匹配: torch.Size([1, 589, 768]) vs 期望 (1, 65, 768)
+  📐 检测到 temporal pos_embed: T=3, spatial=14×14
+  📐 提取中间帧 → 插值: 14×14 → 8×8
+  ✅ pos_embed 处理完成: torch.Size([1, 589, 768]) → torch.Size([1, 65, 768])
+  ✅ Prithvi 权重加载: 101 个 key 匹配
+     Missing: 0, Unexpected: 0
+  ⚠️ 形状不匹配跳过的 key (1 个):
+     - patch_embed.proj.weight: ckpttorch.Size([768, 6, 1, 16, 16]) vs modeltorch.Size([768, 6, 16, 16])
+  🎉 成功加载 101 个预训练权重！
+  Ep  1/50 | Loss 1.977 | ValS 0.523 | ValC 0.541
+  Ep  5/50 | Loss 1.779 | ValS 0.622 | ValC 0.553
+  Ep 10/50 | Loss 1.617 | ValS 0.613 | ValC 0.542
+  Ep 15/50 | Loss 1.709 | ValS 0.621 | ValC 0.538
+  Ep 20/50 | Loss 1.622 | ValS 0.676 | ValC 0.604
+  Ep 25/50 | Loss 1.566 | ValS 0.643 | ValC 0.549
+  Ep 30/50 | Loss 1.565 | ValS 0.707 | ValC 0.658
+  Ep 35/50 | Loss 1.508 | ValS 0.715 | ValC 0.653
+  Ep 40/50 | Loss 1.451 | ValS 0.757 | ValC 0.689
+  Ep 45/50 | Loss 1.471 | ValS 0.719 | ValC 0.657
+  Ep 50/50 | Loss 1.436 | ValS 0.767 | ValC 0.677
+  ✅ Test | IoU=0.7826 | AccC=0.7055 | F1mC=0.2673
+     Change F1 per class: [0.06827978 0.87579233 0.         0.12519886]
+     Checkpoint: /root/autodl-tmp/QaidamPov/checkpoints/prithvi_lora_seed2024.pth
+
+============================================================
+📊 Prithvi+LoRA 汇总结果 (n=3)
+============================================================
+  静态分类:
+    accuracy       : 0.8005 ± 0.0157
+    f1_weighted    : 0.8124 ± 0.0079
+    f1_macro       : 0.6871 ± 0.0155
+    kappa          : 0.3813 ± 0.0350
+    iou_saline     : 0.7774 ± 0.0224
+  变化检测:
+    accuracy       : 0.7086 ± 0.0177
+    f1_weighted    : 0.7223 ± 0.0077
+    f1_macro       : 0.2736 ± 0.0222
+
+✅ 结果保存到: /root/autodl-tmp/QaidamPov/results/prithvi_results.json
+
+🎉 Prithvi+LoRA 训练完成！
