@@ -1,541 +1,386 @@
-# QaidamSalineBench: a reproducible, leakage-aware salinization benchmark
+# DEPLOY.md — how to actually run this thing
 
-> \*\*Read this before anything else. Contact Author, Raymond Xiaohu Fan, fanxiaohu@whcp.edu.cn\*\* The code's default working directory is
-> `PROJECT\_DIR=/root/autodl-tmp/QaidamPov` — our own scratch layout on an AutoDL GPU box.
-> Every script and runner honours the `PROJECT\_DIR` environment variable, so after cloning:
->
-> ```bash
-> export PROJECT\_DIR="$PWD"
-> ```
->
-> and every absolute path below resolves under your checkout. Nothing else is
-> machine-specific.
+**QaidamPov · leakage-audited salinization benchmark (Sentinel-2 + ESA WorldCover)**
+Maintainer: Raymond Fan · fanxiaohu@whcp.edu.cn
 
-> \*A note before you start.\* This repo is the "rebuilt" branch of the project: the original `processed\_dual/\*.npy` tensors and preprocessing scripts were lost, so everything here is regenerated from public data. That means the numbers you get will \*\*not\*\* be byte-identical to any earlier draft of the paper — they are, by construction, a new (and better-documented) dataset. If you're looking for the old 0.803, look at the paper's history, not here. We've stopped mourning it.
+> **A note from Raymond.** I am a remote-sensing person, not a professional software
+> engineer. Everything below is what I actually typed into a terminal, in the order I
+> typed it, including the parts that failed the first three times. If something here
+> looks over-explained, it is because I needed it explained to me too. If you hit a
+> wall, mail me — I would rather answer than have you guess.
 
-\---
+---
 
-## 1\. What this project actually does (and what it doesn't)
+## 0. What this repository contains
 
-It answers three questions, in this order:
+| Part | What it is | Where |
+|---|---|---|
+| `code/rebuild/` | Rebuilds the whole dataset from public archives, no login needed | 8 files |
+| `code/supp/` | 20 experiment scripts + 6 runners + self-tests | ~40 files |
+| `figures/scripts/` | The 6 manuscript figures, Morandi palette, Times serif | 7 files |
+| `manuscript/` | Final Word, PDF and Markdown | 3 files |
+| `results/` | Filled in after you run things — not shipped (numbers are in the paper) | — |
 
-1. **Can we map saline land across the whole Qaidam Basin without any ground-truth labels?** Yes — using ESA WorldCover class 60 as a saline proxy over single-date Sentinel-2 imagery.
-2. **Does a dual-task (multi-task) network beat a single-task one?** No. Not at this sample size. We ran the paired statistics to prove we're not just eyeballing means.
-3. **Is the patch-level evaluation everyone uses actually trustworthy?** No. It leaks, badly. 100% of test patches share their source tile with the training data, and fixing that changes both the numbers and the ranking.
+The paper is the specification. If the code and the paper disagree, the paper is
+right and the code is a bug: tell me.
 
-**What it does NOT do:** no field EC validation (we say so, repeatedly, in the paper), no multi-decadal trend analysis, no operational change-detection product. The four-class "stability" head is an *auxiliary regularizer* and a transparency baseline — not something you'd put in production.
+---
 
-\---
+## 1. Hardware and software
 
-## 2\. Data: what, where, and how to get it
+### 1.1 What I ran it on
 
-Everything is free and account-free. No CDSE login, no API keys, no nothing. (We spent two days discovering that CDSE would have needed an account we didn't have. Don't do that.)
+| Item | Value |
+|---|---|
+| GPU | **1 × RTX 4090, 24 GB** (AutoDL instance; a 3090 also fits, just slower) |
+| CPU | 16 vCPU (anything ≥ 8 works; most experiments are GPU-bound) |
+| RAM | 64 GB (the pixel-level baselines hold 800 k × 9 float32, ~30 MB, so RAM is not the bottleneck) |
+| Disk | ~120 GB: 60 GB imagery cache + 10 GB derived arrays + results |
+| OS | Ubuntu 22.04 |
+| Driver | 570.124.04, CUDA 12.8 runtime reported by `nvidia-smi` |
 
-### 2.1 Sentinel-2 L2A (the inputs)
+I never needed more than one card. Total wall-clock for the full matrix in the paper
+was roughly **9 days**, of which the five-family ablation with eight seeds is about
+6 days. Nothing here is a cluster job.
 
-* **Source:** AWS Earth Search STAC — `https://earth-search.aws.element84.com/v1`, collection `sentinel-2-l2a`.
-* **Bands used (6):** `blue, green, red, nir, swir16, swir22` → i.e. B02, B03, B04, B08, B11, B12.
-* **Resolution / CRS:** 10 m (SWIR at 20 m resampled), UTM `EPSG:326xx`.
-* **Format:** Cloud-Optimized GeoTIFF (COG), `uint16`. Read directly over HTTP with `rasterio` + `/vsicurl` — no bulk download required.
-* **Scene selection:** lowest-cloud scene per MGRS tile inside the 2020 growing season, subject to a cloud-cover ceiling (default 15%).
+### 1.2 Python environment
 
-### 2.2 ESA WorldCover (the labels)
+Python **3.10**. Two ways to get there; pick one and do not mix them.
 
-* **Source:** `https://esa-worldcover.s3.eu-central-1.amazonaws.com`
-* **Paths:** `/v100/2020/map/` and `/v200/2021/map/`
-* **Filenames:** `ESA\_WorldCover\_10m\_2020\_v100\_{TILE}\_Map.tif` and `...\_2021\_v200\_{TILE}\_Map.tif`, where `{TILE}` is the 3°-grid tile name taken from its **lower-left** corner (e.g. `N36E093` covers 36–39°N, 93–96°E).
-* **Label rule (matches the paper):**
-
-  * saline (`1`) ⇐ class **60** (bare / sparse vegetation)
-  * class **70** (snow / ice) is **excluded** from the saline label (geographically and hydro-geochemically unrelated — and the basin's perennial snow lies outside our tiles anyway)
-  * everything else → non-saline (`0`)
-* **Change label (2020 → 2021):** `0` stable non-saline, `1` stable saline, `2` expansion, `3` shrinkage.
-
-> ⚠️ \*\*The v100-vs-v200 trap.\*\* 2020 is v100, 2021 is v200 — two \*different product versions\*. Their differences show up as fake "expansion". This is why the apparent expansion rate in our rebuild (≈3%) is far above the 0.7% of earlier drafts. We treat this as a product-version artefact, and say so in the paper. If you want cleaner change labels, control or correct for the version difference before diffing.
-
-### 2.3 Study area
-
-Qaidam Basin: **36°–39°N, 90°–100°E**. Default bbox in the pipeline is `90 36 100 39`.
-
-\---
-
-## 3\. Preprocessing / rebuilding the dataset
-
-All of it lives in `rebuild/`.
+**Option A — conda (what I use)**
 
 ```bash
-cd rebuild
-python selftest\_rebuild.py      # offline, synthetic GeoTIFFs, no network — run this first
-bash run\_rebuild.sh gate        # 2 real tiles, \~5–10 min — proves the network path works
-nohup bash run\_rebuild.sh all > logs/boot.log 2>\&1 \&   # full rebuild, \~20–40 min
-bash run\_rebuild.sh status      # non-blocking progress (do NOT use tail -f)
-```
-
-**What you get** (`rebuild\_out/processed\_dual/`):
-
-|File|Shape / dtype|Meaning|
-|-|-|-|
-|`train/val/test\_x.npy`|`(280/60/60, 6, 128, 128)` float32|6-band Sentinel-2 patches|
-|`train/val/test\_y\_static.npy`|`(N, 128, 128)` int64|`{0 non-saline, 1 saline}`|
-|`train/val/test\_y\_change.npy`|`(N, 128, 128)` int64|`{0 stable non-sal, 1 stable sal, 2 expansion, 3 shrinkage}`|
-|**`patch\_tiles.npy`**|`(400,)` int64|source-tile id per patch, in `train\|val\|test` order — **this is what makes the leakage-free split possible**|
-|`dataset\_card.json`|—|full provenance: bbox, dates, cloud threshold, tile→scene list, slice params, split, class shares, source URLs|
-
-Wire it into the project root:
-
-```bash
-ln -sfn /root/autodl-tmp/QaidamPov/rebuild\_out /root/autodl-tmp/QaidamPov/data
-```
-
-**Rebuild knobs worth knowing:**
-
-|Flag|Default|Notes|
-|-|-|-|
-|`--bbox W S E N`|`90 36 100 39`|study area|
-|`--date-range`|`2020-06-01/2020-09-30`|growing season|
-|`--max-cloud`|`15`|per-tile scene cloud ceiling|
-|`--max-tiles`|`22`|tile budget (we ended up with **18** usable tiles)|
-|`--region-px`|`640`|centre window per tile at 10 m (= 6.4 km)|
-|`--total`|`400`|target patch count (280+60+60)|
-|`--patch / --stride`|`128 / 64`|matches the paper — and yes, stride 64 = 50% overlap = the leakage source|
-|`--split-mode`|`patch`|use `group` to split by tile (leakage-free)|
-
-\---
-
-## 4\. Code architecture — what's in the box
-
-```
-$PROJECT\_DIR/                      # the repository root (any checkout path)
-├── rebuild/                       # dataset reconstruction (public sources → .npy)
-│   ├── rb\_common.py               #   STAC query, WorldCover fetch, alignment, patch slicing,
-│   │                              #   labelling, split, validation
-│   ├── rebuild\_dataset.py         #   CLI: plan | build | all
-│   ├── run\_rebuild.sh             #   one-shot runner (gate + idempotent steps + summary)
-│   └── selftest\_rebuild.py        #   offline self-test (synthetic rasters, no network)
-│
-├── supp/                          # the experiment suite (this is the interesting part)
-│   ├── common.py                  #   single source of truth: models, datasets, metrics,
-│   │                              #   class weights, paired t-test (hand-rolled, no scipy)
-│   ├── exp\_a\_multiseed\_lambda.py  #   EXP-A: seeds × λ grid + single-task pairing
-│   ├── exp\_b\_export\_raw\_metrics.py#   EXP-B: pooled confusion matrices \& per-class metrics
-│   ├── exp\_c\_unet\_baseline.py     #   EXP-C: U-Net (single \& dual head)
-│   ├── exp\_d\_spatial\_split.py     #   EXP-D: leakage-free tile-level split (+ audit)
-│   ├── exp\_e\_diagnostic.py        #   EXP-E: difficulty-stratified paired ΔIoU
-│   ├── exp\_f\_classical\_baselines.py#  EXP-F: pixel-level Random Forest / XGBoost
-│   ├── exp\_g\_prithvi\_rerun.py     #   EXP-G: Prithvi-EO-1.0-100M + LoRA (patch \& tile splits)
-│   ├── exp\_h\_paired\_pixel\_tests.py#   EXP-H: paired inference on the predictions themselves,
-│   │                              #     bootstrapping spatial units (tiles, or patches as a fallback)
-│   ├── exp\_i\_change\_head\_loss.py  #   EXP-I: change-head loss — CE / focal / focal+balanced
-│   ├── exp\_j\_split\_report.py      #   EXP-J: split census — patches per partition, shared tiles
-│   ├── paired\_stats.py            #   pure-numpy inference kernel: McNemar, cluster bootstrap,
-│   │                              #   pairwise cell tables (importable without torch)
-│   ├── run\_supplementary.sh       #   one-shot runner (gate + idempotent steps + summary)
-│   ├── run\_p1\_extra.sh            #   second runner: EXP-H / EXP-I / EXP-J (+ status, summary)
-│   ├── selftest\_supp.py           #   offline self-test (synthetic data, CPU, 2 epochs)
-│   └── selftest\_p1\_extra.py       #   offline self-test for the inference kernel (26/36 checks)
-│
-├── data/  → symlink to rebuild\_out/processed\_dual/
-├── figures/                       # standalone, self-contained figure pipeline
-│   ├── make\_figures.py            #   one file, no external deps beyond matplotlib/numpy;
-│   │                              #   vendored "burgundy silver" theme (Times serif, >=12 pt)
-│   ├── make\_fig1.py               #   study-area figure, three panels, ships its own
-│   │                              #   simplified geometry in geo/ — no basemap download
-│   ├── fig1\_study\_area.{pdf,png}#    (a) China (b) Qaidam bbox (c) method flow
-│   ├── fig2\_architecture.{pdf,png}#   dual-task CNN block diagram
-│   ├── fig3\_model\_comparison.{pdf,png}  # patch-level vs leakage-free tile-level IoU
-│   └── fig4\_lambda\_ablation.{pdf,png}   # (a) IoU vs λ   (b) paired ΔIoU + 95% CI
-├── results/supplementary/         # every table as JSON + Markdown (see §7)
-└── DEPLOY.md                      # you are here
-```
-
-> `figures/make\_figures.py` is \*\*fully self-contained\*\*: it carries its own palette and
-> rcParams, so it needs nothing from any private tooling — just `matplotlib` + `numpy`.
-> It also runs a programmatic bounding-box overlap check and prints `0 overlaps` for
-> each figure, then writes both a \*\*vector PDF\*\* and a \*\*300 dpi PNG\*\*.
-
-**Design rules we held ourselves to** (so the comparison is actually fair):
-
-* `DualTaskModel` in `supp/common.py` is **layer-for-layer identical** to the original `02\_train\_dual.py`: encoder 128→64→32 (**two** max-pools), two up-samples back to 128. (Earlier drafts of the paper described "three pooling stages" — that was a *text* bug, never a model bug. We fixed the text.)
-* Normalisation uses **train-set** mean/std only; class weights, best-validation model selection, AdamW + cosine schedule all follow the original.
-* **Every `std` is `ddof=1` (sample std)**, everywhere. No more mixing.
-* Statistics are **paired** across identical seeds; the t-test is implemented in-house so the whole suite runs without `scipy`.
-* Nothing overwrites the original scripts or `results/` — all outputs land in `results/supplementary/`.
-
-\---
-
-## 5\. How to run
-
-### 5.1 Environment
-
-```bash
-# everything at once (pinned-ish; see requirements.txt for the exact list)
+conda create -n qaidam python=3.10 -y
+conda activate qaidam
 pip install -r requirements.txt
-
-# or split:
-# core (torch/numpy/sklearn) — everything except EXP-G and the rebuild
-pip install torch torchvision numpy scikit-learn xgboost timm matplotlib
-
-# only for the rebuild pipeline
-pip install rasterio pystac-client shapely pyproj requests
 ```
 
-Tested on Python 3.10–3.12, PyTorch cu124, single **RTX 4090 (24 GB)**. No multi-GPU anything — this is a small-sample benchmark, not a pretraining run.
-
-### 5.2 Two-minute sanity check (CPU, no GPU, no network)
+**Option B — venv**
 
 ```bash
-cd supp \&\& python selftest\_supp.py     # expect ✅ PASS
-cd ../rebuild \&\& python selftest\_rebuild.py
+python3.10 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
 ```
 
-If these pass, the *code* is fine. Any later failure is data or environment.
+### 1.3 The PyTorch line, and the one thing that will bite you
 
-### 5.3 The gate, then the suite
+Install PyTorch **matching your CUDA runtime**, not the newest one:
 
 ```bash
-cd supp
-bash run\_supplementary.sh gate         # \~5 min — run this BEFORE anything long
-nohup bash run\_supplementary.sh all > logs/boot.log 2>\&1 \&
-bash run\_supplementary.sh status       # non-blocking; safe to re-run any time
+# CUDA 12.x (my case: driver 570 / CUDA 12.8 -> cu124 wheels work, cu121 also works)
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
 ```
 
-`all` runs gate → EXP-A → EXP-B → EXP-C → EXP-D and is **idempotent**: finished steps are skipped. Delete a step's output folder to force a rerun.
+> **A note from Raymond.** Do not `pip install torch` from PyPI on a GPU box and
+> assume it works. It will quietly give you a CPU build and your first epoch will
+> take an hour. Check with
+> `python -c "import torch; print(torch.__version__, torch.cuda.is_available())"`
+> and make sure it prints `True`.
 
-### 5.4 Individual experiments
+Everything else (rasterio, pystac-client, shapely, pyproj) is needed **only** for the
+dataset rebuild. If you already have the `.npy` arrays, you can skip that block
+entirely and run on a CPU-only machine for the classical baselines.
+
+---
+
+## 2. Where the data comes from
+
+Nothing in this project needs a login, an API key, or a data-request form. That was a
+deliberate design choice so that a reviewer can rebuild the benchmark.
+
+### 2.1 Imagery — Sentinel-2 L2A
+
+| Item | Detail |
+|---|---|
+| Product | Sentinel-2 **Level-2A** surface reflectance, 6 bands: B02 B03 B04 B08 B11 B12 |
+| Grid | 10 m analysis grid (the two 20 m SWIR bands are resampled) |
+| Access path used | Copernicus Data Space Ecosystem, plus the AWS Earth Search STAC mirror as a fallback: `https://earth-search.aws.element84.com/v1`, collection `sentinel-2-l2a` |
+| Asset keys on the AWS mirror | `blue, green, red, nir, swir16, swir22` (= B02, B03, B04, B08, B11, B12) |
+| Tiles | **18 MGRS tiles**, UTM zones 45–47, listed in Table A1 of the paper |
+| Acquisition window | 25 July – 30 September 2020 (one cloud-free scene per tile) |
+| Cloud ceiling | **15 %** scene-level, lowest-cloud scene below the threshold is kept |
+| Publisher credit | Contains modified Copernicus Sentinel data (2020), processed by ESA |
+
+> **A note from Raymond.** One scene per tile, deliberately. If you start compositing
+> you are no longer reproducing our numbers, you are doing a different paper. The
+> reason is boring: single-date reflectance is what the papers we are arguing with
+> used, and I wanted the confound to be theirs, not mine.
+
+### 2.2 Labels — ESA WorldCover, used as a proxy
+
+| Item | Detail |
+|---|---|
+| Product | ESA WorldCover 10 m |
+| Versions | **v100 (2020)** for the static label, **v200 (2021)** for the change head |
+| Access | Public S3, no credentials: `https://esa-worldcover.s3.eu-central-1.amazonaws.com`, path `/v100/2020/map/` and `/v200/2021/map/` |
+| File naming | `ESA_WorldCover_10m_<year>_<version>_<TILE>_Map.tif`, e.g. `ESA_WorldCover_10m_2020_v100_N36E093_Map.tif`, TILE is a 3° cell (e.g. `N36E093` = 36–39 °N, 93–96 °E) |
+| Class used | **class 60 only** (bare / sparse vegetation) is treated as saline |
+| Licence | CC BY 4.0 |
+| Credit | © ESA WorldCover project 2020 / Contains modified Copernicus Sentinel data |
+
+Read this carefully, because it is the whole point of the paper: **class 60 is not
+salinity.** It is a bare-ground class. Over the Qaidam floor, bare ground and salt
+crust are spectrally close, which is why the proxy works at all, and also why no model
+can exceed IoU ≈ 0.93 on it. If you cite our numbers as "salinity mapping accuracy",
+you have misread them.
+
+### 2.3 Base model weights — Prithvi-EO-1.0
+
+| Item | Detail |
+|---|---|
+| Weights | Prithvi-EO-1.0-100M, from IBM/NASA via Hugging Face |
+| Licence | Apache-2.0 (check the model card before commercial use) |
+| Offline note | Behind the GFW this is the only step that needs help; see §6.4 |
+
+### 2.4 Rebuilding it yourself
 
 ```bash
-bash run\_supplementary.sh expA         # or expB / expC / expD
+cd code/rebuild
+python selftest_rebuild.py            # offline, synthetic GeoTIFFs, no network. Run this FIRST.
+bash run_rebuild.sh gate              # 2 real tiles, ~5–10 min. Proves the network path works.
+nohup bash run_rebuild.sh all > logs/boot.log 2>&1 &      # full rebuild, 20–40 min
+bash run_rebuild.sh status            # non-blocking progress. Do NOT use tail -f.
 ```
 
-EXP-E / EXP-F / EXP-G are standalone (they were added later):
+Key flags (defaults reproduce the paper):
 
-```bash
-# EXP-E: difficulty-stratified diagnostic
-python exp\_e\_diagnostic.py --data-dir ../data/processed\_dual --out-dir ../results/supplementary \\
-    --seeds 42,123,2024 --epochs 30
+| Flag | Default | Meaning |
+|---|---|---|
+| `--bbox` | `90,36,100,39` | sampling frame, lon/lat |
+| `--date-range` | `2020-06-01/2020-09-30` | growing season |
+| `--max-cloud` | `15` | scene-level ceiling, per cent |
+| `--region-px` | `640` | 6.4 km window sampled inside each tile |
+| `--patch / --stride` | `128 / 64` | 50 % overlap by construction |
+| `--total` | `400` | 280 / 60 / 60 |
+| `--saline-classes` | `60` | use `60,70` to widen the proxy |
+| `--split-mode` | `patch` | `group` gives the leakage-free tile split |
 
-# EXP-F: classical pixel baselines (fast, CPU-friendly)
-python exp\_f\_classical\_baselines.py --data-dir ../data/processed\_dual \\
-    --out-dir ../results/supplementary
+Output: `data/processed_dual/{train,val,test}_{x,y_static,y_change}.npy`, with
+`x` of shape `(N, 6, 128, 128)`, float32. A `dataset_card.json` next to it records
+the tile list, dates and counts — keep that file, it is what Table A1 was built from.
 
-# EXP-G: Prithvi-EO + LoRA — patch-level, then leakage-free
-python exp\_g\_prithvi\_rerun.py --data-dir ../data/processed\_dual \\
-    --out-dir ../results/supplementary --prithvi-dir /path/to/prithvi-100M \\
-    --seeds 42,123,2024 --epochs 30
-python exp\_g\_prithvi\_rerun.py --data-dir ../results/supplementary/expD\_spatial/data\_grouped \\
-    --out-dir ../results/supplementary --tag expG\_grouped \\
-    --prithvi-dir /path/to/prithvi-100M --seeds 42,123,2024 --epochs 30
+---
+
+## 3. Repository layout
+
+```
+QaidamPov/
+├── code/
+│   ├── rebuild/                 # dataset reconstruction (network)
+│   │   ├── rebuild_dataset.py   # STAC search -> COG windows -> WorldCover -> .npy
+│   │   ├── rb_common.py         # shared helpers (tiling, resampling, hashing)
+│   │   ├── run_rebuild.sh       # gate / all / status
+│   │   └── selftest_rebuild.py  # offline self-test
+│   ├── supp/
+│   │   ├── common.py            # paths, seeds, IoU-from-confusion-matrix, pooling
+│   │   ├── exp_*.py             # one file per experiment (see §5)
+│   │   ├── run_*.sh             # runners: gate / all / status, idempotent
+│   │   └── selftest_*.py        # offline checks, no GPU, no data
+│   └── build/
+│       └── md2docx_jstars.py    # Markdown -> IEEE-style docx (tables, equations, figures)
+├── figures/
+│   ├── scripts/
+│   │   ├── morandi_style.py     # palette + Times + save() + overlap self-check
+│   │   ├── fig1_...py ... fig6_...py
+│   └── png/ , pdf/              # 600 dpi raster, vector
+└── manuscript/
+    └── final/                   # .md source, .docx, .pdf
+└── results/                     # created at runtime
 ```
 
-> \*\*EXP-G needs the real Prithvi weights.\*\* Put `Prithvi\_100M.pt` in a folder and pass `--prithvi-dir`.
-> If the script can't find it, it will warn and fall back to \*\*random initialisation\*\* — and then your log will say `pretrained=False`, and you must \*\*not\*\* call it a foundation model. We learned this the hard way. Check the log line `✅ Prithvi 权重匹配 N keys` / `pretrained=True` before writing a single sentence about it.
+Design rule I tried to keep: **one script = one table in the paper.** If you want to
+know where a number came from, look at the table, then find the matching `exp_*.py`.
+No hidden state, no notebooks, no `run_everything_v2_final.py`.
 
-Getting the weights:
+---
 
-```bash
-source /etc/network\_turbo
-export HF\_ENDPOINT=https://hf-mirror.com
-huggingface-cli download ibm-nasa-geospatial/Prithvi-EO-1.0-100M \\
-    --local-dir /root/autodl-tmp/models/prithvi-100M
-# the file usually lands as Prithvi\_EO\_V1\_100M.pt — copy it to the name the script looks for:
-cp /root/autodl-tmp/models/prithvi-100M/Prithvi\_EO\_V1\_100M.pt \\
-   /root/autodl-tmp/models/prithvi-100M/Prithvi\_100M.pt
-```
-
-### 5.5 Runtime expectations
-
-|Stage|Time (4090)|
-|-|-|
-|rebuild (full)|20–40 min|
-|gate|\~5 min|
-|EXP-A (15 runs)|\~75 min|
-|EXP-B (reads existing ckpts)|a few minutes|
-|EXP-C (6 runs)|\~40 min|
-|EXP-D split + train|\~10 min|
-|EXP-E (48 short runs)|15–25 min|
-|EXP-F (RF + XGB, CPU+GPU)|2–5 min|
-|EXP-G (3 seeds × 30 ep × 2 splits)|\~30 min|
-
-Whole thing from a blank machine: **call it half a day**, most of it unattended.
-
-\---
-
-### 5.6 The paired-inference batch — EXP-H / EXP-I / EXP-J
-
-These three (plus `expJ`) have their own runner, `supp/run\_p1\_extra.sh`, because they need
-neither the λ grid nor the U-Net:
+## 4. Quick start (the 20-minute version)
 
 ```bash
-cd supp
-bash run\_p1\_extra.sh gate        # \~2 min: data loads, models infer, losses train, tables written
-bash run\_p1\_extra.sh expJ        # split census (seconds)
-bash run\_p1\_extra.sh expH        # paired inference, patch-level split
-bash run\_p1\_extra.sh expHg       # paired inference under the group-disjoint split
-bash run\_p1\_extra.sh expI        # change-head loss sweep (the one step that wants a GPU)
-bash run\_p1\_extra.sh summary     # one-screen digest of everything above
-bash run\_p1\_extra.sh status      # non-blocking progress
-```
+# 1. environment
+conda create -n qaidam python=3.10 -y && conda activate qaidam
+pip install -r requirements.txt
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
 
-Three things about this batch are worth knowing before you read its output.
+# 2. sanity, no GPU needed, no data needed
+cd code/supp && python selftest_supp.py         # expect: PASS
+cd ../rebuild && python selftest_rebuild.py     # expect: PASS
 
-* **The bootstrap unit is a spatial unit, not a pixel.** At \~10⁶ test pixels a pixel-level
-bootstrap makes a 0.07 pp difference look astronomically significant — which is precisely
-the artefact the paper is about. `expH` therefore resamples whole MGRS tiles, and prints
-both intervals side by side so the contrast is visible rather than argued.
-* **`expHg` needs the group-disjoint checkpoints, or it compares across two protocols.**
-Pass them explicitly:
+# 3. get the data (or copy data/processed_dual from wherever you keep it)
+bash run_rebuild.sh gate
+nohup bash run_rebuild.sh all > logs/boot.log 2>&1 &
 
-```bash
-  CKPT\_DIR="$PROJECT\_DIR/results/supplementary/expA\_grouped/ckpts" \\
-    bash run\_p1\_extra.sh expHg
-  ```
-
-  If the checkpoint directory and the data directory disagree about whether the split is
-spatially disjoint, the runner prints a `PROTOCOL MISMATCH` banner, stamps
-`protocol\_warning` into the JSON and marks the table. It will still run — it just refuses
-to let the number pass as a leakage-free result.
-
-* **`expI` labels its own output.** Below ten epochs it writes `SMOKE TEST ONLY` instead of a
-verdict, because a two-epoch run has no opinion about which loss is better.
-
-`paired\_stats.py` imports cleanly without torch, so the inference kernel is unit-testable
-offline: `python selftest\_p1\_extra.py` runs 26 checks on a CPU-only box and 36 with torch
-installed.
-
-\---
-
-## 6\. How to tune
-
-Everything is CLI-flag or env-var. The ones that actually matter:
-
-|Flag|Where|Default|Why you'd change it|
-|-|-|-|-|
-|`--seeds`|all exp|`42,123,2024`|more seeds → more power for the paired test; 3 is the honest minimum|
-|`--epochs`|all exp|`30`|30 saturates on 280 patches; more just overfits|
-|`--lr`|all exp|`1e-3` (5e-4 for Prithvi)|Prithvi wants the smaller one|
-|`--lambda-change`|exp\_a/g, `supp`|`1.0`|the multi-task loss weight; EXP-A sweeps `{0.3,0.5,0.7,1.0}`|
-|`--data-dir`|all exp|`.../data/processed\_dual`|point at `expD\_spatial/data\_grouped` for the leakage-free protocol|
-|`--val-frac / --test-frac`|exp\_d|`0.15 / 0.15`|group fractions for the tile-level re-split (on 18 groups → 3/3 tiles)|
-|`--max-train-pixels`|exp\_f|`800000`|classical baselines subsample train pixels; test pixels are always full|
-|`--lora-r / --lora-alpha`|exp\_g|`8 / 16`|matches the original PEFT recipe|
-|`--no-pretrained`|exp\_g|off|force random init (only for a deliberately labelled ablation)|
-
-Env vars for the shell runner: `SEEDS=42,123,2024,7 LAMBDAS=1.0,0.3,0.5,0.7 bash run\_supplementary.sh expA`.
-
-> Don't be tempted to search for the λ that "wins". It doesn't exist; EXP-A shows every λ is within one std of the single-task baseline. A "best λ" from a 3-seed sample is a λ-\*selected\* value, not an unbiased estimate. We wrote that sentence in the paper and we mean it.
-
-\---
-
-## 7\. How to read the results
-
-Everything lands in `results/supplementary/<tag>/`. There are two kinds of files: `\*.json` (exact numbers) and `TABLE\_\*.md` (human-readable).
-
-|File|What it tells you|
-|-|-|
-|`\_gate/grid\_results.json`|tiny pretest — data loads, model trains, metrics write out|
-|`expA\_multiseed\_lambda/TABLE\_multiseed\_lambda.md`|**Table A1** mean±std per λ; **Table A2** the paired dual-vs-single test (ΔIoU, t, p, 95% CI)|
-|`expB\_raw\_metrics/raw\_metrics\_all.json`|pooled confusion matrices; per-class P/R/F1; test-set class shares|
-|`expC\_unet/TABLE\_unet.md`|U-Net single vs dual|
-|`expD\_spatial/grouped\_split.json`|how the 18 tiles were divided (274/60/66 patches)|
-|`expD\_spatial/grouped\_train\_results.json`|the **leakage-free** dual-task CNN result|
-|`expE\_diagnostic/TABLE\_diagnostic.md`|paired ΔIoU on harder/rarer subsets|
-|`expF\_classical/classical\_results.json`|Random Forest \& XGBoost (pixel-level)|
-|`expG\_prithvi/prithvi\_results.json`|Prithvi-EO + LoRA, patch-level (`pretrained` flag inside!)|
-|`expG\_grouped/prithvi\_results.json`|Prithvi-EO + LoRA, leakage-free|
-
-### The numbers, so you know what to expect
-
-**Patch-level split (the conventional, leaky one):**
-
-|Model|IoU (saline)|
-|-|-|
-|Random Forest (pixel)|**0.926**|
-|XGBoost (pixel)|0.920|
-|U-Net (dual)|0.911|
-|CNN (single-task)|0.902|
-|Dual-task CNN|0.900|
-|Prithvi-EO + LoRA|0.895|
-
-**Leakage-free tile-level split:**
-
-|Model|IoU (saline)|
-|-|-|
-|Random Forest (pixel)|**0.869**|
-|Prithvi-EO + LoRA|0.856|
-|CNN (single-task)|0.825|
-|U-Net (dual)|0.806|
-|Dual-task CNN|0.800|
-
-Three things to take away:
-
-1. **The multi-task head buys nothing.** Paired ΔIoU = −0.001 (p = 0.67) at λ = 1.0; no λ is significant; and under the leakage-free split every ΔIoU goes *negative*.
-2. **Leakage is not a rounding error.** 100% of test patches share a tile with training data; fixing it costs 0.04–0.12 IoU and, crucially, **reorders the models** — Prithvi goes from last place to second.
-3. **A six-band pixel-level Random Forest is the strongest model.** On a nearly spectrally separable proxy label, spatial deep learning buys you complexity, not accuracy. That's an uncomfortable result and we report it anyway.
-
-**Cohen's κ (patch-level, 3 seeds — `expA\_multiseed\_lambda/`):**
-
-|Model|κ (mean ± std)|
-|-|-|
-|CNN (single-task)|0.865 ± 0.001|
-|Dual-task CNN (λ = 1.0)|0.860 ± 0.008|
-
-κ and IoU tell the **same story** — the single-task CNN edges out the dual-task one by a hair, and the gap (0.005) is far inside the seed spread. Reporting two independent imbalance-aware metrics that agree is the whole point of Table 3; if they had disagreed we would have had to explain why.
-
-\---
-
-## 8\. Full reproduction, end to end
-
-```bash
-# 0) environment
-pip install torch torchvision numpy scikit-learn xgboost timm
-pip install rasterio pystac-client shapely pyproj requests
-
-# 1) rebuild the dataset from public sources (\~20–40 min)
-cd rebuild
-python selftest\_rebuild.py                 # expect ✅ PASS
-bash run\_rebuild.sh gate                   # expect ✅ gate passed
-nohup bash run\_rebuild.sh all > logs/boot.log 2>\&1 \&
-bash run\_rebuild.sh status                 # repeat until done
-ln -sfn /root/autodl-tmp/QaidamPov/rebuild\_out /root/autodl-tmp/QaidamPov/data
-
-# 2) experiment suite (\~2–2.5 h, plus EXP-E/F/G below)
+# 4. one short experiment, to prove the whole chain works end to end
 cd ../supp
-python selftest\_supp.py                    # expect ✅ PASS
-bash run\_supplementary.sh gate
-nohup bash run\_supplementary.sh all > logs/boot.log 2>\&1 \&
-bash run\_supplementary.sh status
+bash run_supplementary.sh gate                  # ~5 min
+bash run_supplementary.sh status
 
-# 3) the extras
-python exp\_e\_diagnostic.py   --data-dir ../data/processed\_dual --out-dir ../results/supplementary \\
-     --seeds 42,123,2024 --epochs 30
-python exp\_f\_classical\_baselines.py --data-dir ../data/processed\_dual --out-dir ../results/supplementary
-# EXP-G needs real Prithvi weights (see §5.4), otherwise you get random-init numbers
-python exp\_g\_prithvi\_rerun.py --data-dir ../data/processed\_dual --out-dir ../results/supplementary \\
-     --prithvi-dir /root/autodl-tmp/models/prithvi-100M --seeds 42,123,2024 --epochs 30
-python exp\_g\_prithvi\_rerun.py --data-dir ../results/supplementary/expD\_spatial/data\_grouped \\
-     --out-dir ../results/supplementary --tag expG\_grouped \\
-     --prithvi-dir /root/autodl-tmp/models/prithvi-100M --seeds 42,123,2024 --epochs 30
-
-# 4) collect
-bash run\_supplementary.sh summary
-find ../results/supplementary -name "\*.json" -o -name "TABLE\_\*.md" | sort
+# 5. only then, the long ones
+nohup bash run_supplementary.sh all > logs/boot.log 2>&1 &
 ```
 
-\---
+> **A note from Raymond.** Step 4 is not optional. I once launched a 16-hour batch and
+> found out afterwards that a Python exception had been swallowed and 20 jobs had
+> "finished" in six seconds with no output files. The gate exists because of that day.
+> If `status` says a job is done, check that the file actually exists.
 
-## 9\. Figures
+---
 
-**Yes, there is a figure script now.** It lives in `figures/make\_figures.py` and it is
-deliberately self-contained — no imports from any private theme package, no hidden
-data files, no "works on my machine". It carries its own palette and font settings, so
-the only requirements are `matplotlib` and `numpy`.
+## 5. Running the experiments
+
+All scripts take `--data-dir`, `--out-dir` and `--seeds`; defaults point at
+`data/processed_dual` and `results/supplementary`. Every runner is idempotent: it
+skips a step whose output file already exists, which means **rename or delete old
+outputs before a rerun**, or you will think you reran something you did not.
+
+| Script | Produces | Paper artefact |
+|---|---|---|
+| `exp_j_split_report.py` | split composition, MD5 overlap audit | Table A1, Fig. 2 |
+| `exp_k_label_purity.py` | band statistics, Fisher ratios, linear separability | Fig. 1a, §IV-A |
+| `exp_f_classical_baselines.py` | RF / XGB, raw and index features | Table I top rows |
+| `exp_c_unet_baseline.py` | U-Net single / dual | Table I |
+| `exp_a_multiseed_lambda.py` | λ grid ∈ {0.3, 0.5, 0.7, 1.0} | Table VI |
+| `exp_d_spatial_split.py` | the leakage-free tile split | Table II |
+| `exp_p_common_test.py`, `exp_q_common_eval.py` | the common 66-patch evaluation set | §III-D, Fig. 3 |
+| `exp_r_did.py` | arms A / B, difference-in-differences | Table III, Table IV |
+| **`exp_u_ablation_all.py`** | **five families × three arms × 8 seeds** | **Table III, Fig. 5** |
+| **`exp_v_matched_arm.py`** | **arm C′ (sample-size matched)** | **Fig. 4, §IV-C** |
+| `exp_x_table1_8seed.py` | Table I recomputed on all eight seeds | Table I |
+| `exp_t_leaveout.py` | placebo arm for the U-Net | Table IV |
+| `exp_n_paired_stats.py`, `exp_h_paired_pixel_tests.py` | paired t, sign-flip, pixel-level tests | Table V |
+| `exp_e_diagnostic.py` | difficulty-stratified diagnostic | §V-B |
+| `exp_i_change_head_loss.py` | change head, three losses | Table VI note |
+| `exp_m_clean_aux.py` | cleaned auxiliary-label experiment | Fig. 6 |
+| `exp_b_export_raw_metrics.py` | confusion matrices, per-class metrics | Table VI |
+| `exp_g_prithvi_rerun.py` | Prithvi-EO-1.0 + LoRA | Table I, Table II |
+| `review_patch_tables.py` | regenerates the reviewer-facing tables | supplementary tables |
+
+Longest single job: `exp_u_ablation_all.py` with 8 seeds × 5 families × 3 arms, about
+6 days on one 4090. Run it with `nohup`, then poll:
 
 ```bash
-cd figures
-python make\_figures.py     # writes \*.pdf + \*.png here, prints "0 overlaps" per figure
+nohup python -u exp_u_ablation_all.py --seeds 42,123,2024,7,13,99,777,2025 \
+      > ../logs/expU.log 2>&1 &
+tail -n 40 ../logs/expU.log        # not tail -f; you will never get the prompt back
 ```
 
-What it produces:
+---
 
-|Figure|Content|
-|-|-|
-|`fig2\_architecture`|dual-task CNN block diagram — shared encoder + static head + change head, with the head detail drawn out|
-|`fig3\_model\_comparison`|static saline IoU, **patch-level vs leakage-free tile-level**, side by side, with per-model Δ annotated|
-|`fig4\_lambda\_ablation`|**(a)** IoU vs λ with the single-task baseline as a dashed line; **(b)** paired ΔIoU with 95% CI and the p-value printed on every point|
+## 6. Figures
 
-Three things worth knowing before you edit it:
-
-1. **One scheme, applied everywhere: "burgundy silver"** — deep wine-red (`#7B2233`)
-for the primary series, silver greys (`#B4B6BA`, `#6E7377`) for secondary, a lighter
-wine tint (`#9E4A5C`, `#C08A96`) for emphasis. If you change one figure you should
-change them all; a paper whose figures each wear a different palette looks like four
-different papers. (Ask us how we know.)
-2. **Typeface and size.** The script asks for Times New Roman and falls back through
-Nimbus Roman → Liberation Serif → DejaVu Serif, so it never crashes on a box without
-Times. Minimum font size is **12 pt**; on a stock Linux container without Times you'll
-see `findfont: Font family 'Times New Roman' not found.` in the log and get DejaVu
-instead — install `fonts-liberation` or `msttcorefonts` for the real look.
-3. **The overlap check is not decoration.** `overlap\_check()` renders the figure and
-compares every text bbox programmatically. Low-DPI previews hide label collisions;
-this does not. All three figures currently report `0 overlaps`.
-
-Output is both a **vector PDF** (for the manuscript) and a **300 dpi PNG** (for slides
-and GitHub previews), with `bbox\_inches="tight"` so there is no dead margin.
-
-> The study-area map (Fig. 1) is a GIS raster composite, not a `matplotlib` figure, and
-> is not generated here. Everything else is.
-
-\---
-
-## 10\. FAQ \& the traps that bit us
-
-**Q: `ModuleNotFoundError: No module named 'torch'` in EXP-F.**
-A: You're on a build where `exp\_f` still imported the shared `common.py` (which imports torch). The current `exp\_f\_classical\_baselines.py` is deliberately self-contained (numpy + sklearn only) — make sure you have this version.
-
-**Q: `nohup: ignoring input` then nothing, and no output files.**
-A: You almost certainly forgot to pass the group file to EXP-D. Without `--groups`, `mode split` exits immediately (by design) — zero CPU, zero output, no error. Point it at `patch\_tiles.npy`.
-
-**Q: My parallel edits to a file silently half-applied.**
-A: Not our problem, but we hit it while building this: editing the same Python file with two concurrent writers loses changes silently. Do it serially.
-
-**Q: `pretrained=False` in the EXP-G log.**
-A: You forgot the weights. The comparison is then a *random-init* ViT, not Prithvi. Label it honestly or re-download.
-
-**Q: The expansion class is \~3%, not 0.7% like the paper.**
-A: WorldCover v100 vs v200. Not a bug. See §2.2.
-
-**Q: EXP-D says `100%` leakage and I don't believe it.**
-A: Print `patch\_tiles.npy`: every split contains patches from all 18 tiles. That *is* 100%. It's the whole point.
-
-**Q: Something is `nan`.**
-A: `Change F1-macro` is `nan` for single-head runs by design — there's no change head to score. Not an error.
-
-**Q: Training is much slower than "\~30 seconds per 30-epoch run" in the old docs.**
-A: That was written for a smaller run on a warmer cache. Trust your own wall clock, not old READMEs. (We've all been burned by a stale ETA.)
-
-**Q: Can I run this on CPU?**
-A: The self-tests, EXP-F, and EXP-B yes. Full training no — it'll finish eventually but you won't enjoy it.
-
-\---
-
-## 11\. What's deliberately missing / open
-
-* **Ground-truth EC validation** — none. All accuracies are proxy-label agreements. We say it in the abstract, the results, and the limitations. We mean it.
-* **The study-area map (Fig. 1)** — a GIS raster composite (`figures/` covers Figs. 2–4 only).
-* **Multi-temporal / multi-decadal extension** — future work.
-* **True leakage-free evaluation for *every* baseline under every λ** — we did it for the headline models; extending it everywhere is cheap and left as an exercise (and honestly, a good first PR).
-
-\---
-
-## 12\. Repository layout \& what to ship to GitHub
-
-GitHub rejects single files over 100 MB and warns above 50 MB, so the raw tensors do
-**not** belong in the git history — put them in a **GitHub Release** (2 GB/file) or on
-Zenodo and keep the repo to code, small key artifacts, and figures.
-
-**In the repo (small, safe):**
-
-```
-rebuild/        supp/           figures/
-data/           → NOT committed (regenerate with rebuild/, or fetch from the Release)
-results/supplementary/   \*.json + TABLE\_\*.md   (\~a few MB — commit these, they ARE the result)
-DEPLOY.md       README.md       requirements.txt
+```bash
+cd figures/scripts
+python fig1_design_audit.py      # writes _out/Fig1_*.{png,pdf}
+python fig2_ladder_did.py
+python fig3_separability_rank.py
+python fig6_cprime.py
+python fig4_aux_indices.py
+python fig5_family_gradient.py
 ```
 
-**Not in the repo (large or not-for-release):**
+`morandi_style.py` holds the palette, the Times/Nimbus serif setup, `save()` (PNG at
+600 dpi + vector PDF) and two self-checks: `overlap_report()` for text collisions and
+`edge_ink_check()` for clipped labels. If you change a number, change it in the script,
+not in Illustrator.
 
-|Artifact|Size|Why out|
-|-|-|-|
-|`rebuild\_out/processed\_dual/\*\_x.npy`|\~157 MB|raw tensors; regenerate or attach to a Release|
-|`\*\_y\_static / \_y\_change.npy`|\~105 MB|same (int64; cast to uint8 and they shrink \~87%)|
-|`\*.pth` checkpoints|\~tens MB each|regenerate by rerunning `supp/`|
-|manuscript drafts, revision scripts|—|not part of a code release|
+Colour semantics are fixed across all six figures: `#4E6B80` deep slate = tile-level
+(honest) protocol, `#B0868A` dusty rose = patch-level (leaky) protocol, `#6FA0A0` grey
+teal = deduplicated middle arm, `#C39B72` greige = ordinary data loss.
 
-A ready-to-run packaging command (run from the project root on the server) is in the
-companion `PACKAGE.md`. It writes a single tarball with only code + key results +
-figures, and refuses to include any manuscript file.
+> **A note from Raymond.** Figures in this field are usually where the honesty goes to
+> die — a truncated y-axis here, a cherry-picked seed there. Every figure script here
+> reads the raw per-seed numbers and prints all of them, so if a bar looks good it is
+> because the number is good.
 
-\---
+---
 
-*Finally done. This started as "the dataset is gone, let's just rebuild it" and ended as "actually, nothing in the old results survives a leak-free split, and the model we were proudest of isn't the best one." That's not the paper anyone wanted to write. It is, however, the paper the data supports — and the version where you can hand someone a repo and a command and have them get the same numbers. Which is, in the end, the only kind of result worth defending.*
+## 7. Where the results live, and how to read them
 
+```
+results/supplementary/
+├── expA_multiseed_lambda/grid_results.json      # one row per (seed, λ)
+├── expB_raw_metrics/raw_metrics_all.json        # confusion matrices + per-class metrics
+├── expC_unet_grouped/unet_summary.json
+├── expD_spatial/data_grouped/                   # the tile-level dataset
+├── expU_ablation/{family}/{arm}/                # per-run metrics
+├── expU_ablation_all/TABLE_ablation.md          # the five-family table
+├── expV_matched/TABLE_matched.md                # arm C′
+├── expW_replicate/TABLE_replicate.md            # fresh seeds 1001–1008
+└── common_test/{common_index.json, did.json}    # the 66-patch set and the DiD
+```
+
+Two habits that saved me time:
+
+1. **Trust files, not exit codes.** A job counts as done when its JSON exists and
+   parses, not when the shell says `0`.
+2. **`common_index.json` is the ground truth** for which patch is seen / unseen. Do
+   not infer it from IoU agreement; that heuristic is wrong and it fooled me for a
+   day.
+
+---
+
+## 8. Reproducibility, honestly
+
+The deep pipeline is **not bit-reproducible**. Re-running one configuration at a fixed
+seed moves IoU by about **0.2 points**, and one re-execution moved it by **3.9 points**
+(seed 777). `torch.backends.cudnn.deterministic = True` does not cover everything,
+and one of our ablation scripts overrides it to `benchmark = True` for speed. So:
+
+- read a single run to ±0.2 points at best;
+- an eight-seed mean inherits ≈ 0.5 points from that;
+- confidence intervals in the tables cover **seed-to-seed** variation only.
+
+This is in §III-B of the paper and in the notes to Tables III–V, because a reader who
+compares our numbers to theirs needs to know how much of the difference is noise.
+
+---
+
+## 9. Things that will break
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `CUDA out of memory` on the U-Net | batch 8 + 128² on a 12 GB card | `--batch-size 4`, or `torch.cuda.empty_cache()` between arms |
+| `ModuleNotFoundError: exp_u_ablation_all` | you are in the wrong directory | run from `code/supp`, or set `PROJECT_DIR` |
+| Prithvi download hangs | Hugging Face blocked | `export HF_ENDPOINT=https://hf-mirror.com` **before** `import transformers`; see §6.4 |
+| `libgomp: Invalid value for OMP_...` | joblib inherits a bad thread setting | `export OMP_NUM_THREADS=4` before launching |
+| runner says done, no files | idempotence skipped it | delete the target directory, rerun |
+| `data/processed_dual` missing | rebuild never ran | `bash run_rebuild.sh gate` |
+
+> **A note from Raymond.** Behind the GFW, the only genuinely painful step is fetching
+> the Prithvi weights. Everything else — imagery, WorldCover, all labels — comes down
+> without a proxy. Set `HF_ENDPOINT` *before* the import, not after; the environment
+> variable is read once, at import time, and setting it later silently does nothing.
+
+---
+
+## 10. Citation and contact
+
+If you use the code or the benchmark, please cite the paper (see `README.md`) and the
+two upstream products:
+
+- Copernicus Sentinel-2 L2A, ESA.
+- ESA WorldCover 10 m v100/v200, Zanaga et al., doi:10.5281/zenodo.7254221.
+
+Bugs, questions, disagreements: **Raymond Fan — fanxiaohu@whcp.edu.cn**. I answer
+e-mail faster than issues, but issues are better for the next person.
+
+---
+
+## 11. AI-use statement
+
+My English is not good enough to write a manuscript in the form you have just read,
+and pretending otherwise would waste a reviewer's time. So, plainly:
+
+- The research question, the experimental design, all code, all experiments, all
+  numbers, and the interpretation of those numbers are mine. No result in this
+  repository was produced or selected by a language model.
+- **Drafting, translation between Chinese and English, and language polishing were
+  assisted by Kimi K3 and GLM.** They were used the way one uses a copy-editor: on
+  text that already existed, in my own argument order, with my own claims.
+- Where a model helped, I checked the sentence against the number it refers to. Any
+  remaining error is mine, not the model's, and I would like to hear about it.
+
+I state this because a reader is entitled to know which parts of a paper are
+engineering and which parts are editing, and because I would rather be judged on the
+experiments than on my prose.
